@@ -1,3 +1,2 @@
-streamlit
-py3Dmol
-biopython
+streamlit==1.39.0
+py3Dmol==2.0.4
