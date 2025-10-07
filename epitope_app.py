@@ -41,7 +41,6 @@ def predict_disease_from_sequence(seq):
 # Epitope prediction (mock model)
 # =============================
 def predict_epitopes(seq):
-    # Randomly generate some "epitope" positions for visualization
     if len(seq) < 15:
         return [(1, len(seq))]
     positions = []
@@ -56,7 +55,7 @@ def predict_epitopes(seq):
 # =============================
 def show_mock_structure(seq):
     viewer = py3Dmol.view(width=600, height=400)
-    viewer.addModel("N" * (len(seq) // 10 + 1), "pdb")  # mock structure
+    viewer.addModel("N" * (len(seq) // 10 + 1), "pdb")
     viewer.setStyle({'cartoon': {'color': 'spectrum'}})
     viewer.zoomTo()
     return viewer
@@ -77,4 +76,37 @@ This tool allows you to:
 """)
 
 sequence_input = st.text_area(
-    "E
+    "Enter Protein Sequence (FASTA or plain):",
+    height=180,
+    placeholder=">sp|P0DTC2|SARS-CoV-2 Spike Protein...\nMFVFLVLLPLVSSQCVNLTTRTQLPPAYTNSFTRGVYY..."
+)
+
+if st.button("🔍 Predict Epitope and Disease"):
+    if not sequence_input.strip():
+        st.warning("⚠️ Please enter a valid protein sequence.")
+    else:
+        seq_lines = sequence_input.strip().splitlines()
+        seq = "".join(line.strip() for line in seq_lines if not line.startswith(">"))
+        seq = seq.upper()
+
+        epitopes = predict_epitopes(seq)
+        diseases = predict_disease_from_sequence(seq)
+
+        st.subheader("🧩 Epitope Prediction Result")
+        st.write("**Predicted Epitope Regions (approximate):**")
+        for start, end in epitopes:
+            st.write(f"• Positions {start}–{end} : `{seq[start-1:end]}`")
+
+        st.subheader("🧠 Disease Prediction")
+        st.write(f"**Possible Diseases:** {', '.join(diseases)}")
+
+        for disease in diseases:
+            if disease in disease_info:
+                st.info(f"**{disease}:** {disease_info[disease]}")
+            else:
+                st.warning(f"No detailed information available for {disease}.")
+
+        st.subheader("🧩 3D Structure Viewer")
+        st.caption("This is a simulated 3D representation for visual understanding.")
+        viewer = show_mock_structure(seq)
+        st.components.v1.html(viewer._make_html(), height=420)
