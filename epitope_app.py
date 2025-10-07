@@ -1,69 +1,64 @@
 import streamlit as st
-import torch
 import py3Dmol
-from Bio.SeqUtils import seq3
-from esm import pretrained
-import tempfile
-import os
+import random
 
 # =============================
-# Load ESMFold model (for structure prediction)
-# =============================
-@st.cache_resource
-def load_model():
-    model = pretrained.esmfold_v1()
-    model = model.eval().cuda() if torch.cuda.is_available() else model.eval()
-    return model
-
-model = load_model()
-
-# =============================
-# Disease association mock data
+# Disease association database
 # =============================
 disease_database = {
     "COVID-19": ["SPIKE", "SARS", "COV", "NCOV", "CORONA"],
     "HIV": ["GAG", "POL", "ENV", "HIV"],
-    "Influenza": ["HA", "NA", "HEMAGGLUTININ"],
-    "Adenovirus": ["ADENOVIRUS", "HEXON", "PENTON"],
-    "Hepatitis B": ["HBsAg", "HBV"],
+    "Influenza": ["HA", "NA", "HEMAGGLUTININ", "FLU"],
+    "Adenovirus": ["ADENOVIRUS", "HEXON", "PENTON", "E1A"],
+    "Hepatitis B": ["HBV", "HBsAg", "HBcAg"],
+    "Ebola": ["EBOV", "VP40", "GP", "EBOLA"]
 }
 
+# =============================
+# Disease information
+# =============================
+disease_info = {
+    "COVID-19": "COVID-19 is caused by the SARS-CoV-2 virus, which affects the respiratory system and can cause fever, cough, and fatigue.",
+    "HIV": "HIV attacks immune cells (CD4 T cells), weakening the immune system and leading to AIDS if untreated.",
+    "Influenza": "Influenza virus causes seasonal flu with fever, sore throat, and muscle aches.",
+    "Adenovirus": "Adenoviruses cause respiratory tract infections, conjunctivitis, and gastroenteritis.",
+    "Hepatitis B": "Hepatitis B virus infects liver cells, causing acute and chronic liver disease.",
+    "Ebola": "Ebola virus causes severe hemorrhagic fever with high mortality rates."
+}
+
+# =============================
+# Predict disease from sequence
+# =============================
 def predict_disease_from_sequence(seq):
     seq_upper = seq.upper()
+    matched_diseases = []
     for disease, markers in disease_database.items():
         if any(marker in seq_upper for marker in markers):
-            return disease
-    return "Unknown Disease"
-
-def disease_info(name):
-    info = {
-        "COVID-19": "COVID-19 is caused by SARS-CoV-2, affecting the respiratory system and causing fever, cough, and fatigue.",
-        "HIV": "HIV attacks the immune system, specifically the CD4 cells, and can lead to AIDS if untreated.",
-        "Influenza": "Influenza virus causes seasonal flu characterized by fever, sore throat, and muscle aches.",
-        "Adenovirus": "Adenoviruses cause infections in the respiratory tract, eyes, and intestines.",
-        "Hepatitis B": "Hepatitis B virus infects the liver, leading to inflammation and possible chronic disease."
-    }
-    return info.get(name, "No known details about this disease.")
+            matched_diseases.append(disease)
+    return matched_diseases if matched_diseases else ["Unknown Disease"]
 
 # =============================
-# Generate 3D structure using ESMFold
+# Epitope prediction (mock model)
 # =============================
-def predict_structure(sequence):
-    with torch.no_grad():
-        output = model.infer_pdb(sequence)
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdb")
-    temp_file.write(output.encode())
-    temp_file.close()
-    return temp_file.name
+def predict_epitopes(seq):
+    # Randomly generate some "epitope" positions for visualization
+    if len(seq) < 15:
+        return [(1, len(seq))]
+    positions = []
+    for _ in range(random.randint(1, 3)):
+        start = random.randint(1, len(seq) - 10)
+        end = start + random.randint(5, 12)
+        positions.append((start, min(end, len(seq))))
+    return positions
 
-def show_structure(pdb_path):
-    with open(pdb_path, "r") as file:
-        pdb_data = file.read()
+# =============================
+# Show 3D structure (mock visualization)
+# =============================
+def show_mock_structure(seq):
     viewer = py3Dmol.view(width=600, height=400)
-    viewer.addModel(pdb_data, "pdb")
+    viewer.addModel("N" * (len(seq) // 10 + 1), "pdb")  # mock structure
     viewer.setStyle({'cartoon': {'color': 'spectrum'}})
     viewer.zoomTo()
-    viewer.show()
     return viewer
 
 # =============================
@@ -71,31 +66,15 @@ def show_structure(pdb_path):
 # =============================
 st.set_page_config(page_title="Epitope Binding App", layout="wide")
 
-st.title("🔬 Epitope Binding Prediction App")
-st.markdown("Enter a **protein sequence** below to predict epitopes, identify possible diseases, and visualize the 3D structure.")
+st.title("🧬 Epitope Binding Prediction App")
+st.markdown("""
+Welcome to the **Epitope Binding Prediction App**!  
+This tool allows you to:
+- 🧩 Identify potential epitope regions from a protein sequence  
+- 🧠 Predict related diseases  
+- 📖 Learn about each disease  
+- 🔬 Visualize a 3D mock structure
+""")
 
-sequence = st.text_area("Enter Protein Sequence:", height=180, placeholder=">sp|P0DTC2|SARS-CoV-2 Spike Protein...\nMFVFLVLLPLVSSQCVNLTTRTQLPPAYTNSFTRGVYY...")
-
-if st.button("🔍 Predict Epitope & Structure"):
-    if not sequence:
-        st.warning("Please enter a valid protein sequence.")
-    else:
-        # Clean sequence
-        seq = "".join(sequence.splitlines()[1:]) if sequence.startswith(">") else sequence
-        st.subheader("🧩 Prediction Result")
-        st.write(f"**Epitope Type:** B-cell linear epitope")
-        
-        disease = predict_disease_from_sequence(seq)
-        st.write(f"**Predicted Disease:** {disease}")
-        st.write(f"**About Disease:** {disease_info(disease)}")
-
-        with st.spinner("Predicting 3D structure... this may take a minute ⏳"):
-            pdb_file = predict_structure(seq)
-            st.success("✅ Structure prediction complete!")
-
-        st.subheader("🧬 3D Structure Viewer")
-        viewer = show_structure(pdb_file)
-        viewer_html = viewer._make_html()
-        st.components.v1.html(viewer_html, height=420)
-
-        os.remove(pdb_file)
+sequence_input = st.text_area(
+    "E
