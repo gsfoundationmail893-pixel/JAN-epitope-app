@@ -1,117 +1,124 @@
+# epitope_app.py
 import streamlit as st
-import requests
-import py3Dmol
-import streamlit.components.v1 as components
+import pandas as pd
+from io import StringIO
+from Bio import SeqIO  # from biopython
+import base64
 
-# ===== Step 1: Epitope Prediction (Mock logic) =====
-def predict_epitopes(sequence):
-    if len(sequence) < 60:
-        return []
-    return [
-        {"sequence": sequence[10:20], "type": "B-cell", "start": 10, "end": 20},
-        {"sequence": sequence[50:60], "type": "T-cell", "start": 50, "end": 60}
-    ]
+# -------------------------------
+# Simple Rule-based Epitope Predictor
+# -------------------------------
+def predict_epitopes(seq, window=9, threshold=0.3):
+    hydrophilic = set("KRDEQN")
+    epitopes = []
+    seq = seq.upper()
+    for i in range(len(seq) - window + 1):
+        peptide = seq[i:i + window]
+        score = sum(aa in hydrophilic for aa in peptide) / window
+        if score >= threshold:
+            epitopes.append({
+                "peptide": peptide,
+                "start": i + 1,
+                "end": i + window,
+                "score": round(score, 2)
+            })
+    return epitopes
 
-# ===== Step 2: Fetch REAL Disease Information from UniProt =====
-def get_disease_info(uniprot_id):
-    try:
-        url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.json"
-        response = requests.get(url)
-        if response.status_code != 200:
-            return [{"disease": "Not Found", "description": "No disease data available."}]
-        data = response.json()
+def highlight_sequence_html(seq, epitopes):
+    """
+    Return an HTML string where predicted epitopes are wrapped with a <span>
+    so they appear highlighted. Overlapping epitopes are handled left-to-right.
+    """
+    markers = [False] * len(seq)
+    for e in epitopes:
+        for pos in range(e["start"] - 1, e["end"]):
+            markers[pos] = True
 
-        # Extract disease-related comments
-        disease_list = []
-        for item in data.get("comments", []):
-            if item.get("commentType") == "DISEASE":
-                disease_name = item["disease"]["diseaseId"]
-                description = item["disease"].get("description", "No description available.")
-                disease_list.append({"disease": disease_name, "description": description})
-
-        if not disease_list:
-            disease_list.append({"disease": "Unknown", "description": "No disease information found."})
-        return disease_list
-    except Exception as e:
-        return [{"disease": "Error", "description": f"Could not fetch disease info: {e}"}]
-
-# ===== Step 3: Fetch REAL 3D Structure from AlphaFold =====
-def fetch_3d_structure(uniprot_id):
-    try:
-        url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb"
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.text
+    out = []
+    i = 0
+    while i < len(seq):
+        if markers[i]:
+            j = i
+            while j < len(seq) and markers[j]:
+                j += 1
+            part = seq[i:j]
+            out.append(f'<span style="background-color: #ffef9f; padding:2px; border-radius:3px;">{part}</span>')
+            i = j
         else:
-            return None
-    except Exception:
-        return None
+            out.append(seq[i])
+            i += 1
+    return "".join(out)
 
-# ===== Step 4: 3D Viewer Function =====
-def view_structure(pdb_string, epitopes):
-    view = py3Dmol.view(width=800, height=600)
-    view.addModel(pdb_string, "pdb")
-    view.setStyle({"cartoon": {"color": "spectrum"}})
+def fasta_to_seq(uploaded_file):
+    content = uploaded_file.getvalue().decode("utf-8")
+    records = list(SeqIO.parse(StringIO(content), "fasta"))
+    if not records:
+        return None, "No FASTA records found."
+    # If multiple records, take first and warn
+    if len(records) > 1:
+        return str(records[0].seq), f"Multiple records found — using first record: {records[0].id}"
+    return str(records[0].seq), None
 
-    # Highlight predicted epitopes in red
-    for epi in epitopes:
-        res_range = list(range(epi["start"], epi["end"] + 1))
-        view.addStyle({"resi": res_range}, {"stick": {"color": "red"}})
+def df_to_csv_download_link(df, filename="epitopes.csv"):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">⬇️ Download CSV</a>'
+    return href
 
-    view.zoomTo()
-    html = view._make_html()  # ✅ Corrected syntax line
-    components.html(html, height=600, width=800)
+# -------------------------------
+# Streamlit Web App
+# -------------------------------
+st.set_page_config(page_title="Epitope Prediction", layout="wide")
+st.title("🧬 Epitope Prediction App")
+st.markdown("""
+A simple rule-based B-cell epitope predictor (sliding window, hydrophilic scoring).
+You can paste a sequence or upload a FASTA file.  
+""")
 
-# ===== Streamlit Interface =====
-st.title("🧬 Epitope Prediction & Protein Structure Viewer")
-st.write("Enter a UniProt ID and/or a protein sequence to predict epitopes, view real disease data, and explore the AlphaFold 3D structure.")
+col1, col2 = st.columns([2,1])
 
-uniprot_id = st.text_input("Enter UniProt ID (e.g., P51587 for BRCA2_HUMAN):")
-sequence = st.text_area("Paste Protein Sequence (optional):", height=200)
+with col1:
+    seq_input = st.text_area("Paste protein sequence (single-letter codes) or leave blank to upload FASTA:", height=160)
 
-if st.button("🔍 Predict Epitope"):
-    if not uniprot_id and not sequence:
-        st.error("⚠️ Please enter either a UniProt ID or a protein sequence.")
+    uploaded = st.file_uploader("Upload FASTA file (optional)", type=["fa","fasta","txt"])
+    fasta_msg = None
+    if uploaded:
+        seq_from_fasta, fasta_msg = fasta_to_seq(uploaded)
+        if seq_from_fasta is None:
+            st.error(fasta_msg)
+        else:
+            if not seq_input.strip():
+                seq_input = seq_from_fasta
+            st.success("FASTA loaded." if fasta_msg is None else fasta_msg)
+
+    window = st.number_input("Window length (peptide length)", min_value=5, max_value=25, value=9, step=1)
+    threshold = st.slider("Hydrophilic fraction threshold", min_value=0.0, max_value=1.0, value=0.3, step=0.05)
+
+    predict_btn = st.button("Predict Epitopes")
+
+with col2:
+    st.markdown("### How scoring works")
+    st.markdown("- Sliding window of length `window` (default 9).  \n- Hydrophilic residues counted: `K R D E Q N`  \n- Score = fraction of hydrophilic residues in the window.  \n- Windows with score >= threshold are returned.")
+
+if predict_btn:
+    if not seq_input or not seq_input.strip():
+        st.warning("Please enter a sequence or upload a FASTA file.")
     else:
-        with st.spinner("Processing..."):
-            # Fetch protein sequence from UniProt if not pasted
-            if not sequence and uniprot_id:
-                fasta_url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.fasta"
-                fasta_response = requests.get(fasta_url)
-                if fasta_response.status_code == 200:
-                    fasta_text = fasta_response.text
-                    sequence = "".join(fasta_text.split("\n")[1:])
-                else:
-                    st.warning("Could not fetch sequence from UniProt.")
-
-            # Predict epitopes
-            epitopes = predict_epitopes(sequence) if sequence else []
-
-            # Get disease info
-            disease_info = get_disease_info(uniprot_id) if uniprot_id else []
-
-            # Fetch structure
-            pdb_string = fetch_3d_structure(uniprot_id) if uniprot_id else None
-
-        # --- Display Predicted Epitopes ---
-        st.subheader("🧩 Predicted Epitopes")
-        if epitopes:
-            for epi in epitopes:
-                st.write(f"**Sequence:** {epi['sequence']} | **Type:** {epi['type']} | **Positions:** {epi['start']}-{epi['end']}")
+        seq = "".join(seq_input.split()).upper()
+        epitopes = predict_epitopes(seq, window=window, threshold=threshold)
+        if not epitopes:
+            st.error("No epitopes predicted with the current settings.")
         else:
-            st.info("No epitopes predicted (sequence too short or missing).")
+            st.success(f"Predicted {len(epitopes)} epitope(s).")
+            df = pd.DataFrame(epitopes)
+            st.table(df)
+            st.markdown(df_to_csv_download_link(df), unsafe_allow_html=True)
 
-        # --- Display Disease Info ---
-        st.subheader("🧫 Associated Diseases")
-        if disease_info:
-            for d in disease_info:
-                st.markdown(f"**Disease:** {d['disease']}  \n🩸 *{d['description']}*")
-        else:
-            st.info("No disease information found for this protein.")
+            # Highlight and display sequence
+            html = highlight_sequence_html(seq, epitopes)
+            st.markdown("### Sequence (highlighted predicted epitope regions):")
+            st.markdown(f'<div style="font-family:monospace; white-space:pre-wrap; font-size:14px;">{html}</div>', unsafe_allow_html=True)
 
-        # --- Display Structure ---
-        st.subheader("🧠 3D Protein Structure (from AlphaFold)")
-        if pdb_string:
-            view_structure(pdb_string, epitopes)
-        else:
-            st.warning("No 3D structure found in AlphaFold for this UniProt ID.")
+# Example and footer
+st.info("Example sequence you can use: `MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYR`")
+st.caption("This is a toy predictor for demonstration and teaching purposes only.")
