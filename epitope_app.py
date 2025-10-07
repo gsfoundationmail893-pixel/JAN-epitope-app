@@ -29,4 +29,58 @@ def get_disease_info(protein_id="P12345"):
 
 # ===== Step 3: Structure Generation =====
 def fetch_3d_structure(sequence):
-    # MOCK PDB — replace wi
+    # MOCK PDB — replace with AlphaFold/ColabFold API later
+    pdb_string = """
+HEADER    MOCK STRUCTURE
+ATOM      1  N   MET A   1      11.104  13.207   2.100  1.00 20.00
+ATOM      2  CA  MET A   1      12.104  14.207   3.100  1.00 20.00
+ATOM      3  C   MET A   1      13.104  15.207   2.500  1.00 20.00
+ATOM      4  O   MET A   1      14.104  16.207   2.900  1.00 20.00
+END
+"""
+    return pdb_string
+
+# ===== Step 4: Viewer Function =====
+def view_structure(pdb_string, epitopes):
+    view = py3Dmol.view(width=800, height=600)
+    view.addModel(pdb_string, "pdb")
+    view.setStyle({"cartoon": {"color": "spectrum"}})
+
+    for epi in epitopes:
+        view.addStyle({"resi": list(range(epi["start"], epi["end"] + 1))}, {"stick": {"color": "red"}})
+
+    view.zoomTo()
+    html = view._make_html()
+    components.html(html, height=600, width=800)
+
+# ===== Streamlit UI =====
+st.title("🧬 Epitope Prediction & 3D Protein Structure Viewer")
+st.write("Paste a protein sequence to predict epitopes, fetch disease info, and view the protein structure.")
+
+sequence = st.text_area("Protein Sequence", height=200)
+
+if st.button("Predict Epitope"):
+    if not sequence:
+        st.error("⚠️ Please enter a protein sequence!")
+    else:
+        with st.spinner("🔬 Processing..."):
+            epitopes = predict_epitopes(sequence)
+            disease_info = get_disease_info()
+            pdb_string = fetch_3d_structure(sequence)
+
+        # Display predicted epitopes
+        st.subheader("Predicted Epitopes")
+        if not epitopes:
+            st.write("⚠️ Sequence too short for mock prediction.")
+        else:
+            for epi in epitopes:
+                st.write(f"**Sequence:** {epi['sequence']} | **Type:** {epi['type']} | **Positions:** {epi['start']}-{epi['end']}")
+
+        # Display disease info
+        st.subheader("Associated Diseases")
+        for disease in disease_info:
+            st.write(f"**Disease:** {disease['disease']} | **Description:** {disease['description']}")
+
+        # Display 3D structure
+        st.subheader("3D Protein Structure with Epitope Highlight")
+        view_structure(pdb_string, epitopes)
