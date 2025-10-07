@@ -1,76 +1,82 @@
 import streamlit as st
-import py3Dmol
-import streamlit.components.v1 as components
+import requests
+import json
+import stmol
+from Bio import SeqIO
+from io import StringIO
 
-# ===== Step 1: Epitope Prediction =====
-def predict_epitope(sequence):
-    # MOCK example (replace with real prediction later)
+# Function to predict epitopes (mock implementation)
+def predict_epitopes(sequence):
+    # Replace with actual epitope prediction logic
     return [
         {"sequence": sequence[10:20], "type": "B-cell", "start": 10, "end": 20},
         {"sequence": sequence[50:60], "type": "T-cell", "start": 50, "end": 60}
     ]
 
-# ===== Step 2: Disease Association =====
-def get_disease_info(sequence):
-    # MOCK example (replace with UniProt API later)
-    return {
-        "protein_name": "Spike glycoprotein",
-        "disease": "COVID-19",
-        "description": "COVID-19 is caused by SARS-CoV-2, a coronavirus responsible for respiratory illness worldwide."
-    }
+# Function to fetch disease information from UniProt
+def get_disease_info(protein_id):
+    url = f"https://rest.uniprot.org/uniprotkb/{protein_id}.json"
+    response = requests.get(url)
+    data = response.json()
+    diseases = data.get('diseases', [])
+    disease_info = [{"disease": disease['name'], "description": disease.get('description', 'No description available')} for disease in diseases]
+    return disease_info
 
-# ===== Step 3: Structure Generation =====
-def generate_structure(sequence):
-    # MOCK PDB — Replace with AlphaFold/ColabFold API
+# Function to fetch 3D structure using AlphaFold or similar service
+def fetch_3d_structure(sequence):
+    # Replace with actual structure fetching logic
+    # For demonstration, we'll use a mock PDB string
     pdb_string = """
     HEADER    MOCK STRUCTURE
     ATOM      1  N   MET A   1      11.104  13.207   2.100  1.00 20.00
     ATOM      2  CA  MET A   1      12.104  14.207   3.100  1.00 20.00
     ATOM      3  C   MET A   1      13.104  15.207   2.500  1.00 20.00
+    ATOM      4  O   MET A   1      14.104  16.207   2.900  1.00 20.00
     END
     """
     return pdb_string
 
-# ===== Step 4: Viewer Function Compatible with Streamlit =====
-def view_structure(pdb_string, epitopes):
-    view = py3Dmol.view(width=800, height=600)
-    view.addModel(pdb_string, "pdb")
-    view.setStyle({"cartoon": {"color": "spectrum"}})
+# Function to render 3D structure using Stmol
+def render_3d_structure(pdb_string, epitopes):
+    viewer = stmol.view(width=800, height=600)
+    viewer.add_model(pdb_string, "pdb")
+    viewer.set_style({"cartoon": {"color": "spectrum"}})
 
     # Highlight epitopes
     for epi in epitopes:
-        view.addStyle({"resi": list(range(epi["start"], epi["end"] + 1))}, {"stick": {"color": "red"}})
+        viewer.add_style({"resi": list(range(epi["start"], epi["end"] + 1))}, {"stick": {"color": "red"}})
 
-    view.zoomTo()
+    viewer.zoom_to()
+    viewer.show()
 
-    # Render as HTML for Streamlit
-    html = view.render()
-    components.html(html, height=600, width=800)
+# Streamlit UI
+st.title("🧬 Epitope Prediction and Protein Structure Viewer")
+st.write("Enter a protein sequence to predict epitopes, view associated diseases, and explore the 3D structure.")
 
-# ===== Streamlit App UI =====
-st.title("🧬 Epitope Prediction Web App")
-st.write("Paste your protein sequence below to predict epitopes, associated disease info, and view the protein structure.")
+sequence_input = st.text_area("Protein Sequence", height=200)
 
-sequence = st.text_area("Paste Protein Sequence", height=200)
+if st.button("Analyze"):
+    if sequence_input:
+        with st.spinner("Processing..."):
+            # Predict epitopes
+            epitopes = predict_epitopes(sequence_input)
 
-if st.button("Predict Epitope"):
-    if not sequence:
-        st.error("⚠️ Please enter a protein sequence!")
-    else:
-        with st.spinner("🔬 Predicting epitopes and generating structure..."):
-            epitopes = predict_epitope(sequence)
-            disease_info = get_disease_info(sequence)
-            pdb_string = generate_structure(sequence)
+            # Fetch disease information (mock protein ID used here)
+            disease_info = get_disease_info("P12345")
 
+            # Fetch 3D structure
+            pdb_string = fetch_3d_structure(sequence_input)
+
+        # Display results
         st.subheader("Predicted Epitopes")
         for epi in epitopes:
-            st.markdown(f"- **Sequence:** `{epi['sequence']}`  |  **Type:** `{epi['type']}`  |  **Positions:** `{epi['start']}-{epi['end']}`")
+            st.write(f"**Sequence:** {epi['sequence']} | **Type:** {epi['type']} | **Position:** {epi['start']}-{epi['end']}")
 
-        st.subheader("Disease Info")
-        st.markdown(f"- **Protein:** {disease_info['protein_name']}")
-        st.markdown(f"- **Disease:** {disease_info['disease']}")
-        st.markdown(f"- **Description:** {disease_info['description']}")
+        st.subheader("Associated Diseases")
+        for disease in disease_info:
+            st.write(f"**Disease:** {disease['disease']} | **Description:** {disease['description']}")
 
-        st.subheader("3D Protein Structure with Epitope Highlight")
-        view_structure(pdb_string, epitopes)
-
+        st.subheader("3D Protein Structure")
+        render_3d_structure(pdb_string, epitopes)
+    else:
+        st.error("Please enter a protein sequence.")
